@@ -30,3 +30,6 @@ Notes
 Limitations & next steps
 - Hotkeys are single characters only.
 - More robust key handling, persistent mappings, and better animations can be added.
+
+# image-filter
+App to filter image like Tinder
