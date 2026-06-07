@@ -214,41 +214,55 @@ class SortPage(QWidget):
         self.animate_and_run('right', on_finished=do_move)
 
     def skip(self):
-        # animate left and load next without moving
+        # Record a skip action and advance to next image. Undo will ignore skips.
         if not self.current:
             return
-
-        def after():
-            logger.debug('Skipped image: %s', str(self.current))
-            self.load_next()
-
-        self.animate_and_run('left', on_finished=after)
+        original = self.current
+        logger.debug('Skipped image: %s', str(original))
+        # record skip so undo will ignore but history keeps it
+        self.action_stack.append(('skip', original))
+        logger.debug('Pushed skip action for: %s', str(original))
+        # advance
+        self.load_next()
 
     def undo(self):
-        if not self.action_stack:
+        # pop until we find a move action (ignore legacy skip entries)
+        while self.action_stack:
+            action = self.action_stack.pop()
+            if not action:
+                continue
+            action_type = action[0]
+            if action_type != 'move':
+                logger.debug('Ignoring non-move action on undo: %s', action_type)
+                continue
+            # found a move to undo
+            _, dst, original = action
+            if not dst.exists():
+                logger.debug('Undo target no longer exists: %s', str(dst))
+                return
+            logger.debug('Undoing move: %s -> %s', str(dst), str(original))
+            try:
+                shutil.move(str(dst), str(original))
+            except Exception as e:
+                logger.exception('Undo failed')
+                QMessageBox.warning(self, 'Undo failed', str(e))
+                return
+            # recollect all images and put the restored image at the front
+            try:
+                imgs = self._collect_images()
+                # ensure we use Path objects and place original first
+                imgs = [p for p in imgs if p != dst]
+                if original in imgs:
+                    imgs.remove(original)
+                imgs.insert(0, original)
+                self.images = deque(imgs)
+                logger.debug('Undo completed and recollected %d images, restored %s to front', len(imgs), str(original))
+            except Exception:
+                # fallback: just put original at front
+                self.images.appendleft(original)
+                logger.exception('Recollect after undo failed; used fallback')
+            self.load_next()
             return
-        action = self.action_stack.pop()
-        if not action:
-            return
-        action_type = action[0]
-        if action_type != 'move':
-            logger.debug('Undo skipped for non-move action: %s', action_type)
-            return
-        _, dst, original = action
-        if not dst.exists():
-            logger.debug('Undo target no longer exists: %s', str(dst))
-            return
-        logger.debug('Undoing move: %s -> %s', str(dst), str(original))
-        try:
-            shutil.move(str(dst), str(original))
-        except Exception as e:
-            logger.exception('Undo failed')
-            QMessageBox.warning(self, 'Undo failed', str(e))
-            return
-        # reinsert original at front of queue
-        self.images.appendleft(original)
-        logger.debug('Undo completed, reinserted %s', str(original))
-        self.load_next()
 
 
 class MainWindow(QWidget):
